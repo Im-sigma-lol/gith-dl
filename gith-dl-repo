@@ -1,0 +1,211 @@
+#!/data/data/com.termux/files/usr/bin/sh
+
+echo -n "Choose mode (1 for AFK mode, 2 for ACTIVE mode): "
+read mode
+
+echo -n "Do you want to update all accounts in the current directory? (Y/N): "
+read update_all
+
+# Function to check if the account exists on GitHub
+account_exists() {
+    username=$1
+    response=$(curl -s "https://api.github.com/users/$username")
+    if echo "$response" | grep -q '"message": "Not Found"'; then
+        return 1  # Account doesn't exist
+    else
+        return 0  # Account exists
+    fi
+}
+
+# Fetch repos for the username, handling the rate limit and authentication
+fetch_repos() {
+    username=$1
+    total_repos=0
+    page=1
+    repos=""
+
+    if ! account_exists "$username"; then
+        echo "Account $username does not exist. Skipping fetch."
+        [ ! -f .non_existent_accounts ] && touch .non_existent_accounts
+        if ! grep -q "$username" .non_existent_accounts; then
+            echo "$username" >> .non_existent_accounts
+        fi
+        return 1
+    fi
+
+    while true; do
+        response=$(curl -s -H "$auth_header" "https://api.github.com/users/$username/repos?per_page=100&page=$page")
+
+        if echo "$response" | grep -q "API rate limit exceeded"; then
+            reset_time=$(curl -sI -H "$auth_header" "https://api.github.com/rate_limit" | grep X-RateLimit-Reset | awk '{print $2}')
+            current_time=$(date +%s)
+            wait_time=$((reset_time - current_time))
+            echo "Rate limit exceeded. Waiting $wait_time seconds..."
+
+            if [ "$mode" -eq 1 ]; then
+                # AFK mode: Wait without authentication
+                [ "$wait_time" -gt 0 ] && sleep "$wait_time" || sleep 1
+                continue
+            else
+                # Active mode: Prompt for auth after rate limit
+                if [ -z "$auth_header" ]; then
+                    echo "Authentication required. Please provide your GitHub token."
+                    echo -n "Enter your GitHub token: "
+                    stty -echo
+                    read token
+                    stty echo
+                    echo
+                    auth_header="Authorization: token $token"
+                fi
+                continue
+            fi
+        fi
+
+        current_repos=$(echo "$response" | jq -r '.[] | .clone_url')
+        repos="$repos $current_repos"
+
+        fetched_repos_count=$(echo "$current_repos" | wc -w)
+        total_repos=$((total_repos + fetched_repos_count))
+
+        if [ "$fetched_repos_count" -lt 100 ]; then
+            break
+        fi
+
+        page=$((page + 1))
+    done
+
+    # Check for private repositories or non-existent ones
+    for repo in $repos; do
+        repo_name=$(basename "$repo" .git)
+        response=$(curl -s -H "$auth_header" "https://api.github.com/repos/$username/$repo_name")
+
+        if echo "$response" | grep -q '"message": "Not Found"'; then
+            echo "Repository $repo_name no longer exists or has been renamed."
+            continue
+        elif echo "$response" | grep -q '"private": true'; then
+            if [ "$mode" -eq 1 ]; then
+                # AFK mode: Log private repos instead of asking for auth
+                echo "Repository $repo_name is private. Logging it for AFK mode." >> .private_repos_log
+                continue
+            else
+                # Active mode: Proceed with authentication for private repo
+                echo "Repository $repo_name is private. Authentication required."
+                continue
+            fi
+        fi
+    done
+
+    echo "$repos"
+}
+
+# Prompt to update all accounts in the directory
+if [ "$update_all" = "Y" ] || [ "$update_all" = "y" ]; then
+    for account_dir in */; do
+        if [ -d "$account_dir" ]; then
+            cd "$account_dir" || continue
+            cache_file=".repo_hashes"
+            non_existent_file=".non_existent_accounts"
+
+            [ ! -f "$cache_file" ] && touch "$cache_file"
+            [ ! -f "$non_existent_file" ] && touch "$non_existent_file"
+
+            echo "Updating repositories in account: $account_dir"
+
+            if grep -q "$(basename "$account_dir")" "$non_existent_file"; then
+                echo "Account $(basename "$account_dir") no longer exists. Skipping update."
+                cd ..
+                continue
+            fi
+
+            for repo_dir in *.git; do
+                if [ -d "$repo_dir" ]; then
+                    repo_name=$(basename "$repo_dir" .git)
+                    latest_hash=$(git --git-dir="$repo_dir" ls-remote origin HEAD | awk '{print $1}')
+                    cached_hash=$(grep "^$repo_name:" "$cache_file" | cut -d':' -f2)
+
+                    if [ "$latest_hash" != "$cached_hash" ]; then
+                        echo "Updating $repo_name in $account_dir"
+                        git --git-dir="$repo_dir" fetch --all
+                        grep -v "^$repo_name:" "$cache_file" > "$cache_file.tmp" && mv "$cache_file.tmp" "$cache_file"
+                        echo "$repo_name:$latest_hash" >> "$cache_file"
+                    else
+                        echo "$repo_name in $account_dir is up-to-date."
+                    fi
+                fi
+            done
+
+            cd ..
+        fi
+    done
+    echo "All accounts updated."
+    exit 0
+fi
+
+echo -n "Enter the GitHub username to update: "
+read username
+if [ -z "$username" ]; then
+    echo "Usage: $0 <github-username>"
+    exit 1
+fi
+
+# Force prompt for authentication in ACTIVE mode if account doesn't exist
+if ! account_exists "$username"; then
+    if [ "$mode" = "2" ]; then
+        echo "Account $username does not exist on GitHub. You must authenticate."
+        echo -n "Enter your GitHub token: "
+        stty -echo
+        read token
+        stty echo
+        echo
+        auth_header="Authorization: token $token"
+    else
+        echo "Account $username does not exist. Skipping authentication prompt."
+    fi
+else
+    echo -n "Use authentication for private repos and higher rate limits? (Y/N): "
+    read use_auth
+    if [ "$use_auth" = "Y" ] || [ "$use_auth" = "y" ]; then
+        echo -n "Enter your GitHub token: "
+        stty -echo
+        read token
+        stty echo
+        echo
+        auth_header="Authorization: token $token"
+    else
+        auth_header=""
+    fi
+fi
+
+repos=$(fetch_repos "$username")
+
+if [ $? -eq 1 ]; then
+    echo "Skipping repository update for non-existent account."
+    exit 1
+fi
+
+mkdir -p "$username"
+cd "$username" || exit
+
+cache_file=".repo_hashes"
+
+[ ! -f "$cache_file" ] && touch "$cache_file"
+
+for repo in $repos; do
+    repo_name=$(basename "$repo" .git)
+    latest_hash=$(git ls-remote "$repo" HEAD | awk '{print $1}')
+    cached_hash=$(grep "^$repo_name:" "$cache_file" | cut -d':' -f2)
+
+    if [ "$latest_hash" = "$cached_hash" ]; then
+        echo "Repository $repo_name is up-to-date."
+    else
+        echo "Cloning/updating: $repo_name"
+        if [ -d "$repo_name.git" ]; then
+            rm -rf "$repo_name.git"
+        fi
+        git clone --bare --mirror "$repo" "$repo_name.git" || echo "Failed to clone $repo" >> ../clone_errors.log
+        grep -v "^$repo_name:" "$cache_file" > "$cache_file.tmp" && mv "$cache_file.tmp" "$cache_file"
+        echo "$repo_name:$latest_hash" >> "$cache_file"
+    fi
+done
+
+echo "Done."
