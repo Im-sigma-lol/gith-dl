@@ -1,0 +1,16 @@
+#!/bin/bash
+
+case "$1" in
+    -repo)
+        shift
+        exec gith-dl-repo "$@"
+        ;;
+    -gist)
+        shift
+        exec gith-dl-gist "$@"
+        ;;
+    *)
+        echo "Usage: gith-dl -repo| -gist [args...]"
+        exit 1
+        ;;
+esac
