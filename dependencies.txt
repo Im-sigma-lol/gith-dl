@@ -1,0 +1,6 @@
+pkg git
+pkg curl
+pkg jq
+pkg python
+pip gitpython
+pip requests
