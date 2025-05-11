@@ -4,9 +4,7 @@
 ## Installation
 
 ```bash
-REPO_URL="https://github.com/Im-sigma-lol/gith-dl"
-INSTALL_BIN="/data/data/com.termux/files/usr/bin/gith-dl"
-[ -f "$INSTALL_BIN" ] || { TEMP=$(mktemp -d) && git clone "$REPO_URL" "$TEMP" && cd "$TEMP" && bash install.sh && cd - && rm -rf "$TEMP"; }
+REPO_URL="https://github.com/Im-sigma-lol/gith-dl"; INSTALL_BIN="/data/data/com.termux/files/usr/bin/gith-dl"; command -v git >/dev/null 2>&1 || pkg install -y git; [ -f "$INSTALL_BIN" ] || { TEMP=$(mktemp -d) && git clone "$REPO_URL" "$TEMP" && cd "$TEMP" && bash install.sh && cd - && rm -rf "$TEMP"; }
 ```
 
 This installs `gith-dl` if it is not already present on your system.
