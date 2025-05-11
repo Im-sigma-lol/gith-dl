@@ -4,7 +4,7 @@
 ## Installation
 
 ```bash
-REPO_URL="https://github.com/Nobodylmao-sigma-is-me/gith-dl"
+REPO_URL="https://github.com/Im-sigma-lol/gith-dl"
 INSTALL_BIN="/data/data/com.termux/files/usr/bin/gith-dl"
 [ -f "$INSTALL_BIN" ] || { TEMP=$(mktemp -d) && git clone "$REPO_URL" "$TEMP" && cd "$TEMP" && bash install.sh && cd - && rm -rf "$TEMP"; }
 ```
