@@ -25,7 +25,6 @@ while read -r line; do
         fi
     fi
 done < dependencies.txt
-
 echo "[*] Installing gith-dl commands..."
 install -m 755 gith-dl "$PREFIX_BIN/gith-dl"
 install -m 755 gith-dl-repo "$PREFIX_BIN/gith-dl-repo"
