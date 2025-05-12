@@ -1,98 +1,85 @@
 #!/bin/sh
 
-echo -n "Do you want to update and download all gists for all accounts? (Y/N): "
+# Prompt user
+echo -n "Do you want to update all gists for all accounts? (Y/N): "
 read update_all
 
+# Check if a GitHub user exists
 account_exists() {
-    username=$1
-    response=$(curl -s "https://api.github.com/users/$username")
-    if echo "$response" | grep -q '"message": "Not Found"'; then
-        return 1
-    else
-        return 0
-    fi
+    curl -s "https://api.github.com/users/$1" | grep -qv '"message": "Not Found"'
 }
 
+# Fetch all gist git URLs for a user
 fetch_gists() {
-    username=$1
-    if ! account_exists "$username"; then
-        echo "Account $username does not exist. Skipping fetch."
-        return 1
-    fi
-
-    response=$(curl -s "https://api.github.com/users/$username/gists")
-    echo "$response" | jq -r '.[].git_pull_url'
+    username="$1"
+    page=1
+    while :; do
+        response=$(curl -s "https://api.github.com/users/$username/gists?page=$page&per_page=100")
+        count=$(echo "$response" | jq length)
+        [ "$count" -eq 0 ] && break
+        echo "$response" | jq -r '.[].git_pull_url'
+        page=$((page + 1))
+    done
 }
 
-# Updating ALL accounts
+# Clone or fetch a single gist
+clone_or_update_gist() {
+    username="$1"
+    gist_id="$2"
+    dir="$3/$gist_id.git"
+    url="https://gist.githubusercontent.com/$username/$gist_id.git"
+
+    if [ ! -d "$dir" ]; then
+        echo "Cloning new gist: $gist_id"
+        git clone --bare --mirror "$url" "$dir" || echo "Failed to clone $gist_id"
+    elif [ ! -f "$dir/FETCH_HEAD" ]; then
+        echo "FETCH_HEAD missing for $gist_id, re-cloning..."
+        rm -rf "$dir"
+        git clone --bare --mirror "$url" "$dir" || echo "Failed to re-clone $gist_id"
+    else
+        echo "Fetching updates for $gist_id"
+        (cd "$dir" && git fetch --all)
+    fi
+}
+
+# Update all accounts
 if [ "$update_all" = "Y" ] || [ "$update_all" = "y" ]; then
     for account_dir in */; do
         [ ! -d "$account_dir" ] && continue
         account_name=$(basename "$account_dir")
-        echo "Updating gists for account: $account_name"
+        echo "Updating account: $account_name"
 
-        for gist_git_dir in "$account_dir"*/; do
-            [ ! -d "$gist_git_dir" ] && continue
+        gist_urls=$(fetch_gists "$account_name")
+        [ -z "$gist_urls" ] && echo "No gists found." && continue
 
-            gist_git_dir="${gist_git_dir%/}"  # Remove trailing slash
-            gist_id=$(basename "$gist_git_dir" .git)
-
-            # Check if FETCH_HEAD exists
-            if [ ! -f "$gist_git_dir/FETCH_HEAD" ]; then
-                echo "FETCH_HEAD missing for $gist_id, re-cloning..."
-
-                # Remove the broken gist folder
-                rm -rf "$gist_git_dir"
-
-                # Re-clone the gist
-                git_url="https://gist.githubusercontent.com/$account_name/$gist_id.git"
-                git clone --bare --mirror "$git_url" "$account_dir$gist_id.git" || echo "Failed to clone $gist_id"
-            else
-                echo "Fetching updates for $gist_id"
-                (cd "$gist_git_dir" && git fetch --all)
-            fi
+        for url in $gist_urls; do
+            gist_id=$(basename "$url" .git)
+            clone_or_update_gist "$account_name" "$gist_id" "$account_dir"
         done
     done
-    echo "All gists updated."
+    echo "All accounts updated."
     exit 0
 fi
 
-# Updating a single username
-echo -n "Enter the GitHub username to update gists: "
+# Update a single user
+echo -n "Enter GitHub username to update gists: "
 read username
-if [ -z "$username" ]; then
-    echo "Usage: $0 <github-username>"
-    exit 1
-fi
+[ -z "$username" ] && echo "Username is required." && exit 1
 
-gists=$(fetch_gists "$username")
-if [ $? -eq 1 ]; then
-    echo "Skipping gists update for non-existent account."
+if ! account_exists "$username"; then
+    echo "User $username not found."
     exit 1
 fi
 
 mkdir -p "$username"
 cd "$username" || exit 1
 
-for gist_url in $gists; do
-    gist_id=$(basename "$gist_url" .git)
-    echo "Processing gist: $gist_id"
+gists=$(fetch_gists "$username")
+[ -z "$gists" ] && echo "No gists found for $username." && exit 0
 
-    git_url="https://gist.githubusercontent.com/$username/$gist_id.git"
-
-    if [ ! -d "$gist_id.git" ]; then
-        echo "Cloning new gist: $gist_id"
-        git clone --bare --mirror "$git_url" "$gist_id.git" || echo "Failed to clone $gist_id"
-    else
-        if [ ! -f "$gist_id.git/FETCH_HEAD" ]; then
-            echo "FETCH_HEAD missing for $gist_id, re-cloning..."
-            rm -rf "$gist_id.git"
-            git clone --bare --mirror "$git_url" "$gist_id.git" || echo "Failed to clone $gist_id"
-        else
-            echo "Fetching updates for $gist_id"
-            (cd "$gist_id.git" && git fetch --all)
-        fi
-    fi
+for url in $gists; do
+    gist_id=$(basename "$url" .git)
+    clone_or_update_gist "$username" "$gist_id" "."
 done
 
 echo "All gists for $username updated."
