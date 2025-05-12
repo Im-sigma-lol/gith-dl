@@ -51,52 +51,58 @@ mkdir -p CHECKOUT
 
 for account_dir in */; do
     [ -d "$account_dir" ] || continue
+
     account_name="${account_dir%/}"
+    target_dir="CHECKOUT/$account_name"
+    mkdir -p "$target_dir"
+
+    metadata_file="$target_dir/metadata.json"
+    [ -f "$metadata_file" ] || echo "{}" > "$metadata_file"
 
     echo "Processing account: $account_name"
 
-    output_dir="CHECKOUT/$account_name"
-    mkdir -p "$output_dir"
+    for git_repo in "$account_dir"/*.git; do
+        [ -d "$git_repo" ] || continue
 
-    for git_dir in "$account_dir"*.git; do
-        [ -d "$git_dir" ] || continue
+        echo "Checking out repo: $git_repo"
 
-        repo_name="${git_dir##*/}"
-        repo_name="${repo_name%.git}"
-        temp_checkout="CHECKOUT/tmp_$account_name/$repo_name"
+        tmp_dir=$(mktemp -d)
 
-        echo "  Checking out $git_dir to $temp_checkout"
-        mkdir -p "$temp_checkout"
-        GIT_DIR="$git_dir" git --work-tree="$temp_checkout" checkout -f
-    done
+        # Checkout latest files into temp dir
+        GIT_DIR="$git_repo" git --work-tree="$tmp_dir" checkout -f
 
-    echo "  Flattening into $output_dir"
+        # Iterate over checked out files
+        find "$tmp_dir" -type f | while read -r file; do
+            rel_path="${file#$tmp_dir/}"
+            file_hash=$(md5sum "$file" | awk '{print $1}')
 
-    find "CHECKOUT/tmp_$account_name" -mindepth 1 -type f -exec bash -c '
-        output_dir="$1"
-        shift
-        for f; do
-            name=$(basename "$f")
-            base="${name%.*}"
-            ext="${name##*.}"
-            [ "$base" = "$name" ] && ext=""
-            n=1
-            dest="$output_dir/$name"
-            while [ -e "$dest" ]; do
-                dest="$output_dir/${base} ($n)${ext:+.$ext}"
-                ((n++))
+            # Check if hash exists in metadata
+            if jq -e --arg h "$file_hash" 'to_entries[] | select(.value == $h)' "$metadata_file" > /dev/null; then
+                echo "Skipping duplicate: $rel_path"
+                continue
+            fi
+
+            # Handle filename collisions
+            base_name=$(basename "$rel_path")
+            dest_path="$target_dir/$base_name"
+            count=1
+            while [ -e "$dest_path" ]; do
+                dest_path="$target_dir/${base_name%.*}($count).${base_name##*.}"
+                [ "$base_name" = "${base_name%.*}" ] && dest_path="$target_dir/${base_name}($count)"
+                count=$((count + 1))
             done
-            mv "$f" "$dest"
+
+            echo "Adding file: $dest_path"
+            cp "$file" "$dest_path"
+
+            # Update metadata.json
+            jq --arg k "$(basename "$dest_path")" --arg v "$file_hash" '. + {($k): $v}' "$metadata_file" > "$metadata_file.tmp" && mv "$metadata_file.tmp" "$metadata_file"
+
         done
-    ' _ "$output_dir" {} +
 
-    # Remove the temp checkout folder
-    rm -rf "CHECKOUT/tmp_$account_name"
-
-    echo "  Done with $account_name"
+        rm -rf "$tmp_dir"
+    done
 done
-
-echo "All done."
 ```
 
 ### Example:
