@@ -49,17 +49,54 @@ To convert the `.git` folders into readable project directories, run the followi
 
 mkdir -p CHECKOUT
 
-for dir in *.git; do
-    if [ -d "$dir" ]; then
-        repo_name="${dir%.git}"
-        target_dir="CHECKOUT/$repo_name"
+for account_dir in */; do
+    [ -d "$account_dir" ] || continue
+    account_name="${account_dir%/}"
 
-        echo "Checking out bare repo $dir to $target_dir"
+    echo "Processing account: $account_name"
 
-        mkdir -p "$target_dir"
-        GIT_DIR="$dir" git --work-tree="$target_dir" checkout -f
-    fi
+    output_dir="CHECKOUT/$account_name"
+    mkdir -p "$output_dir"
+
+    for git_dir in "$account_dir"*.git; do
+        [ -d "$git_dir" ] || continue
+
+        repo_name="${git_dir##*/}"
+        repo_name="${repo_name%.git}"
+        temp_checkout="CHECKOUT/tmp_$account_name/$repo_name"
+
+        echo "  Checking out $git_dir to $temp_checkout"
+        mkdir -p "$temp_checkout"
+        GIT_DIR="$git_dir" git --work-tree="$temp_checkout" checkout -f
+    done
+
+    echo "  Flattening into $output_dir"
+
+    find "CHECKOUT/tmp_$account_name" -mindepth 1 -type f -exec bash -c '
+        output_dir="$1"
+        shift
+        for f; do
+            name=$(basename "$f")
+            base="${name%.*}"
+            ext="${name##*.}"
+            [ "$base" = "$name" ] && ext=""
+            n=1
+            dest="$output_dir/$name"
+            while [ -e "$dest" ]; do
+                dest="$output_dir/${base} ($n)${ext:+.$ext}"
+                ((n++))
+            done
+            mv "$f" "$dest"
+        done
+    ' _ "$output_dir" {} +
+
+    # Remove the temp checkout folder
+    rm -rf "CHECKOUT/tmp_$account_name"
+
+    echo "  Done with $account_name"
 done
+
+echo "All done."
 ```
 
 ### Example:
