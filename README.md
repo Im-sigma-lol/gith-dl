@@ -103,6 +103,7 @@ for account_dir in */; do
         rm -rf "$tmp_dir"
     done
 done
+rm -rf CHECKOUT/CHECKOUT
 ```
 
 ### Example:
