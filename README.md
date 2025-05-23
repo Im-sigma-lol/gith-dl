@@ -48,7 +48,7 @@ To convert the `.git` folders into readable project directories, run the followi
 #!/bin/bash
 
 flat_mode=0
-if [ "$1" = "1" ]; then
+if [ "$1" = "secret" ]; then
     flat_mode=1
 fi
 
@@ -120,7 +120,7 @@ for account_dir in */; do
     done
 done
 
-rm -rf CHECKOUT/CHECKOUT
+rm -rf CHECKOUT/CHECKOUT             
 ```
 
 ### Example:
