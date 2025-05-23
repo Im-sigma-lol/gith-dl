@@ -53,16 +53,20 @@ for account_dir in */; do
     [ -d "$account_dir" ] || continue
 
     account_name="${account_dir%/}"
-    target_dir="CHECKOUT/$account_name"
-    mkdir -p "$target_dir"
-
-    metadata_file="$target_dir/metadata.json"
-    [ -f "$metadata_file" ] || echo "{}" > "$metadata_file"
+    base_target_dir="CHECKOUT/$account_name"
+    mkdir -p "$base_target_dir"
 
     echo "Processing account: $account_name"
 
     for git_repo in "$account_dir"/*.git; do
         [ -d "$git_repo" ] || continue
+
+        repo_name=$(basename "$git_repo" .git)
+        target_dir="$base_target_dir/$repo_name"
+        mkdir -p "$target_dir"
+
+        metadata_file="$target_dir/metadata.json"
+        [ -f "$metadata_file" ] || echo "{}" > "$metadata_file"
 
         echo "Checking out repo: $git_repo"
 
@@ -76,19 +80,26 @@ for account_dir in */; do
             rel_path="${file#$tmp_dir/}"
             file_hash=$(md5sum "$file" | awk '{print $1}')
 
-            # Check if hash exists in metadata
+            # Sanitize filename
+            base_name=$(basename "$rel_path")
+            sanitized_name=$(echo "$base_name" | sed 's/[^A-Za-z0-9._]/ /g')
+            dest_path="$target_dir/$sanitized_name"
+
+            # Skip duplicates
             if jq -e --arg h "$file_hash" 'to_entries[] | select(.value == $h)' "$metadata_file" > /dev/null; then
                 echo "Skipping duplicate: $rel_path"
                 continue
             fi
 
             # Handle filename collisions
-            base_name=$(basename "$rel_path")
-            dest_path="$target_dir/$base_name"
             count=1
             while [ -e "$dest_path" ]; do
-                dest_path="$target_dir/${base_name%.*}($count).${base_name##*.}"
-                [ "$base_name" = "${base_name%.*}" ] && dest_path="$target_dir/${base_name}($count)"
+                name_no_ext="${sanitized_name%.*}"
+                ext="${sanitized_name##*.}"
+                [ "$sanitized_name" = "$name_no_ext" ] && ext=""
+                new_name="${name_no_ext}($count)"
+                [ -n "$ext" ] && new_name="$new_name.$ext"
+                dest_path="$target_dir/$new_name"
                 count=$((count + 1))
             done
 
@@ -97,12 +108,12 @@ for account_dir in */; do
 
             # Update metadata.json
             jq --arg k "$(basename "$dest_path")" --arg v "$file_hash" '. + {($k): $v}' "$metadata_file" > "$metadata_file.tmp" && mv "$metadata_file.tmp" "$metadata_file"
-
         done
 
         rm -rf "$tmp_dir"
     done
 done
+
 rm -rf CHECKOUT/CHECKOUT
 ```
 
