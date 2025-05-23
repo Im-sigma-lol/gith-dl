@@ -47,6 +47,11 @@ To convert the `.git` folders into readable project directories, run the followi
 ```bash
 #!/bin/bash
 
+flat_mode=0
+if [ "$1" = "1" ]; then
+    flat_mode=1
+fi
+
 mkdir -p CHECKOUT
 
 for account_dir in */; do
@@ -62,7 +67,8 @@ for account_dir in */; do
         [ -d "$git_repo" ] || continue
 
         repo_name=$(basename "$git_repo" .git)
-        target_dir="$base_target_dir/$repo_name"
+        target_dir="$base_target_dir"
+        [ "$flat_mode" -eq 0 ] && target_dir="$base_target_dir/$repo_name"
         mkdir -p "$target_dir"
 
         metadata_file="$target_dir/metadata.json"
