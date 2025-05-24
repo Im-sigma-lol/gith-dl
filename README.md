@@ -48,7 +48,7 @@ To convert the `.git` folders into readable project directories, run the followi
 #!/bin/bash
 
 flat_mode=0
-if [ "$1" = "secret" ]; then
+if [ "$1" = "50" ]; then
     flat_mode=1
 fi
 
@@ -86,10 +86,15 @@ for account_dir in */; do
             rel_path="${file#$tmp_dir/}"
             file_hash=$(md5sum "$file" | awk '{print $1}')
 
-            # Sanitize filename
+            # Sanitize only filename, not full path
             base_name=$(basename "$rel_path")
-            sanitized_name=$(echo "$base_name" | sed 's/[^A-Za-z0-9._]/ /g')
-            dest_path="$target_dir/$sanitized_name"
+            dir_name=$(dirname "$rel_path")
+            sanitized_base=$(echo "$base_name" | sed 's/[^A-Za-z0-9._]/ /g')
+            sanitized_path="$dir_name/$sanitized_base"
+            dest_path="$target_dir/$sanitized_path"
+
+            # Create target subdirectory if it doesn't exist
+            mkdir -p "$(dirname "$dest_path")"
 
             # Skip duplicates
             if jq -e --arg h "$file_hash" 'to_entries[] | select(.value == $h)' "$metadata_file" > /dev/null; then
@@ -100,27 +105,28 @@ for account_dir in */; do
             # Handle filename collisions
             count=1
             while [ -e "$dest_path" ]; do
-                name_no_ext="${sanitized_name%.*}"
-                ext="${sanitized_name##*.}"
-                [ "$sanitized_name" = "$name_no_ext" ] && ext=""
+                name_no_ext="${sanitized_base%.*}"
+                ext="${sanitized_base##*.}"
+                [ "$sanitized_base" = "$name_no_ext" ] && ext=""
                 new_name="${name_no_ext}($count)"
                 [ -n "$ext" ] && new_name="$new_name.$ext"
-                dest_path="$target_dir/$new_name"
+                sanitized_path="$dir_name/$new_name"
+                dest_path="$target_dir/$sanitized_path"
                 count=$((count + 1))
             done
 
             echo "Adding file: $dest_path"
             cp "$file" "$dest_path"
 
-            # Update metadata.json
-            jq --arg k "$(basename "$dest_path")" --arg v "$file_hash" '. + {($k): $v}' "$metadata_file" > "$metadata_file.tmp" && mv "$metadata_file.tmp" "$metadata_file"
+            # Update metadata.json (use relative path inside repo)
+            jq --arg k "$sanitized_path" --arg v "$file_hash" '. + {($k): $v}' "$metadata_file" > "$metadata_file.tmp" && mv "$metadata_file.tmp" "$metadata_file"
         done
 
         rm -rf "$tmp_dir"
     done
 done
 
-rm -rf CHECKOUT/CHECKOUT             
+rm -rf CHECKOUT/CHECKOUT         
 ```
 
 ### Example:
