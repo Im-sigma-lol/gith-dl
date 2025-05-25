@@ -1,7 +1,9 @@
 #!/usr/bin/env python3 import os import sys import json import hashlib import requests
 
-API_BASE = "https://api.github.com" HEADERS = { "Accept": "application/vnd.github.squirrel-girl-preview+json" }
-
+API_BASE = "https://api.github.com"
+HEADERS = {
+    "Accept": "application/vnd.github.squirrel-girl-preview+json"  # Needed for reactions
+}
 def ensure_dir(path): os.makedirs(path, exist_ok=True)
 
 def save_json(data, path): with open(path, "w", encoding="utf-8") as f: json.dump(data, f, indent=2)
