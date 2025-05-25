@@ -4,12 +4,21 @@ import sys
 import json
 import hashlib
 import requests
+import subprocess
 
+def get_gh_token():
+    try:
+        result = subprocess.run(["gh", "auth", "token"], capture_output=True, text=True, check=True)
+        return result.stdout.strip()
+    except Exception as e:
+        print(f"Failed to get GitHub token: {e}")
+        return None
 API_BASE = "https://api.github.com"
+token = get_gh_token()
 HEADERS = {
-    "Accept": "application/vnd.github.squirrel-girl-preview+json"  # Needed for reactions
+    "Accept": "application/vnd.github.squirrel-girl-preview+json",
+    "Authorization": f"token {token}" if token else None
 }
-
 def ensure_dir(path):
     os.makedirs(path, exist_ok=True)
 
