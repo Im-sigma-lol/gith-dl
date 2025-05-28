@@ -1,42 +1,43 @@
 #!/bin/bash
 
-# Make sure you're logged into GitHub CLI
-gh auth status > /dev/null 2>&1 || {
+# Ensure you're logged into GitHub
+if ! gh auth status &>/dev/null; then
     echo "❌ Please run 'gh auth login' first."
     exit 1
-}
+fi
 
-# Root directory: current working dir
 ROOT_DIR="$(pwd)"
+GITHUB_USERNAME=$(gh api user --jq .login)
 
-# Find all `.git` folders inside subdirectories
-find . -type d -name ".git" | while read -r GITDIR; do
-    REPO_PATH=$(dirname "$GITDIR")        # e.g., ./SomeUser/scripts.git
-    REPO_NAME=$(basename "$REPO_PATH")    # e.g., scripts.git
-    ACCOUNT_DIR=$(basename "$(dirname "$REPO_PATH")")  # e.g., SomeUser
+# Configure git to use gh token for HTTPS
+git config --global credential.helper "$(gh auth git-credential)"
 
-    # Clean up .git suffix for repo creation
-    CLEAN_REPO_NAME="${REPO_NAME%.git}"
+# Find all folders ending in .git (bare repos)
+find . -type d -name "*.git" | while read -r BARE_REPO; do
+    ACCOUNT_NAME=$(basename "$(dirname "$BARE_REPO")")
+    REPO_NAME=$(basename "$BARE_REPO" .git)
+    FINAL_REPO_NAME="Reuploaded-from-${ACCOUNT_NAME}---${REPO_NAME}"
 
-    echo "📦 Found: $ACCOUNT_DIR/$CLEAN_REPO_NAME"
+    echo "📦 Processing $ACCOUNT_NAME/$REPO_NAME → $FINAL_REPO_NAME"
 
-    # Move .git repo to clean folder if needed
-    DEST_FOLDER="$ROOT_DIR/$ACCOUNT_DIR/$CLEAN_REPO_NAME"
-    if [[ "$REPO_PATH" == *".git" ]]; then
-        mkdir -p "$DEST_FOLDER"
-        mv "$REPO_PATH/.git" "$DEST_FOLDER/.git"
-        rm -rf "$REPO_PATH"
-    fi
+    # Temp clone of bare repo
+    TEMP_DIR=$(mktemp -d)
+    git clone --bare "$BARE_REPO" "$TEMP_DIR/$REPO_NAME" &>/dev/null
+    cd "$TEMP_DIR/$REPO_NAME" || continue
 
-    cd "$DEST_FOLDER" || continue
-
-    # Set a remote if none exists
-    if ! git remote | grep -q origin; then
-        gh_user=$(gh api user --jq .login)
-        gh repo create "$gh_user/$CLEAN_REPO_NAME" --private --source=. --push
+    # Create repo on GitHub if it doesn't exist
+    if gh repo view "$GITHUB_USERNAME/$FINAL_REPO_NAME" &>/dev/null; then
+        echo "⚠️  Repo already exists: $FINAL_REPO_NAME"
     else
-        echo "🔁 Remote already exists for $CLEAN_REPO_NAME, skipping repo create."
+        gh repo create "$FINAL_REPO_NAME" --private -y &>/dev/null
+        echo "✅ Created: https://github.com/$GITHUB_USERNAME/$FINAL_REPO_NAME"
     fi
 
-    cd "$ROOT_DIR" || exit
+    # Push with gh-authenticated git
+    git push --mirror "https://github.com/$GITHUB_USERNAME/$FINAL_REPO_NAME.git" &>/dev/null
+    echo "🚀 Pushed to GitHub"
+
+    # Cleanup
+    cd "$ROOT_DIR"
+    rm -rf "$TEMP_DIR"
 done
